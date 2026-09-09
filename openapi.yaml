@@ -1,0 +1,975 @@
+openapi: 3.0.0
+info:
+  title: ARTEMIS Geometric Alignment Service API
+  version: "1.0.0"
+  description: >
+    The geometric alignment service (GAS) provides a mechanism to invoke algorithms for the automatic alignment of 3D models remotely, without requiring to run the alignment itself on the client platform. Alignment is a core operation on many digitization and virtual restoration tasks and the 3D data involved may be very detailed and large to handle locally on the client device.
+
+servers:
+  - url: /api/v1/simulation
+    description: ARTEMIS Simulation API Base Path.
+
+tags:
+  - name: Geometric Alignment
+    description: Microservices for geometric operations and alignment sessions.
+
+paths:
+  ###########################################################
+  # Session & Lock Management
+  ###########################################################
+  /geom_align/create_session:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Create an alignment session
+      description: Create an alignment session, including the parameters for the setup.
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSessionBody' }
+      responses:
+        '200':
+          description: A valid alignment session has been initialized.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  token: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/validate_session:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Validate active session
+      description: Check if the current session is complete in terms of mandatory configuration properties.
+      operationId: validateSession
+      parameters:
+        - $ref: '#/components/parameters/SessionTokenQuery'
+      responses:
+        '200':
+          description: The session is active and operations can be performed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidateSessionResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '410':
+          description: The session with the specific token has expired.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/end_session:
+    delete:
+      tags: [ Geometric Alignment ]
+      summary: End alignment session
+      description: Closes the connection with the client and remote renderer deallocates all configurations associated with that client.
+      operationId: endSession
+      parameters:
+        - $ref: '#/components/parameters/SessionTokenQuery'
+      responses:
+        '200':
+          description: Session successfully closed.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '410':
+          description: The session with the specific token has expired.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/acquire_lock:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Acquire project lock
+      description: Acquires an exclusive lock allowing the caller to modify the project.
+      operationId: acquireLock
+      responses:
+        '201':
+          description: Either the user succeeded in acquiring the lock or it was already locked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcquireLockResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /geom_align/release_lock:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Release project lock
+      description: Allows the client that currently holds the project lock to explicitly release it.
+      operationId: releaseLock
+      responses:
+        '200':
+          description: Lock successfully released.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseLockResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Conflict. Caller does not own the active lock.
+
+  /geom_align/get_lock_state:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Get lock state
+      description: Returns the current locking status of the project ID.
+      operationId: getLockState
+      responses:
+        '200':
+          description: Lock state successfully returned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetLockStateResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  ###########################################################
+  # Parameter & Part Management
+  ###########################################################
+  /geom_align/set_parameters:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Change registration parameters
+      description: Change parameters for the registration session.
+      operationId: setParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetParametersBody' }
+      responses:
+        '200':
+          description: Parameters were correctly changed.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/add_part:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Add a 3D model
+      description: Add a 3D model to the registration set.
+      operationId: addPart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddPartBody' }
+      responses:
+        '201':
+          description: Part successfully created on the GAS.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AddPartResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The requested asset described by the given URL cannot be found.
+        '405':
+          description: Method Not Allowed. Transformation matrix is invalid.
+        '415':
+          description: Unsupported format.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '507':
+          description: Insufficient internal storage or memory.
+
+  /geom_align/part_status:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Check asset status
+      description: Ask for the status of an asset with regard to its readiness for queries.
+      operationId: getPartStatus
+      parameters:
+        - name: model_url
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        '200':
+          description: Asset readiness status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartStatusResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The requested asset is not yet registered.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/set_part_transform:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Update object-to-world transform
+      description: Update the object-to-world transformation of a specific part.
+      operationId: setPartTransform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetPartTransformBody' }
+      responses:
+        '200':
+          description: Transformation successfully updated.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The requested instance ID cannot be found.
+        '405':
+          description: Transformation matrix is invalid.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/delete_part:
+    delete:
+      tags: [ Geometric Alignment ]
+      summary: Remove a part
+      description: Remove a particular part from the alignment session.
+      operationId: deletePart
+      parameters:
+        - name: part_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The requested operation was successful.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The requested part was not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  ###########################################################
+  # Groups & Anchors
+  ###########################################################
+  /geom_align/group_parts:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Group multiple parts
+      description: Group two or more parts in a unified group to be treated as a single part.
+      operationId: groupParts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupPartsBody' }
+      responses:
+        '201':
+          description: Parts successfully grouped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupPartsResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/ungroup_parts:
+    delete:
+      tags: [ Geometric Alignment ]
+      summary: Ungroup parts
+      description: Releases the parts involved in a group and destroys the group.
+      operationId: ungroupParts
+      parameters:
+        - name: group_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Parts successfully ungrouped.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/add_anchor:
+    post:
+      tags: [ Geometric Alignment ]
+      summary: Add pair of anchor points
+      description: Add a pair of anchor points for a pair of parts to enforce the alignment between them.
+      operationId: addAnchor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddAnchorBody' }
+      responses:
+        '201':
+          description: Anchor was successfully created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AddAnchorResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/delete_anchor:
+    delete:
+      tags: [ Geometric Alignment ]
+      summary: Delete an anchor
+      description: Delete an anchor.
+      operationId: deleteAnchor
+      parameters:
+        - name: anchor_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Operation successful.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  ###########################################################
+  # Simulations & Status Checking
+  ###########################################################
+  /geom_align/align:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Perform registration between parts
+      description: Performs registration between a source and target model or model cluster.
+      operationId: align
+      parameters:
+        - name: source_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: target_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: time
+          in: query
+          required: true
+          schema: { type: number }
+      responses:
+        '200':
+          description: The requested operation was successful.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlignResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: At least one of the requested part IDs was not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/get_align_status:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Get status of alignment
+      description: Retrieves the cached status of the alignment operation.
+      operationId: getAlignStatus
+      parameters:
+        - name: source_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: target_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The requested operation was successful.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetAlignStatusResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The requested pair is not present in the current session.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/bundle_adjust:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Optimize group alignment
+      description: Optimize the alignment of parts within a group so that an overall fitting error is minimized.
+      operationId: bundleAdjust
+      parameters:
+        - name: group_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: time
+          in: query
+          required: true
+          schema: { type: number }
+      responses:
+        '200':
+          description: The requested operation was successful.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BundleAdjustResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The group ID was invalid.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /geom_align/get_bundle_status:
+    get:
+      tags: [ Geometric Alignment ]
+      summary: Get bundle adjustment status
+      description: Retrieves the status of the bundle adjustment operation.
+      operationId: getBundleStatus
+      parameters:
+        - name: group_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The requested operation was successful.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetBundleStatusResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The requested group ID is not present.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+
+components:
+  ###########################################################
+  # Parameters
+  ###########################################################
+  parameters:
+    SessionTokenQuery:
+      name: session_token
+      in: query
+      required: true
+      description: Text string of the geometric alignment session token.
+      schema:
+        type: string
+        minLength: 1
+
+  ###########################################################
+  # Schemas
+  ###########################################################
+  schemas:
+    CreateSessionBody:
+      type: object
+      required: [ session_token, project_id ]
+      properties:
+        session_token:
+          type: string
+          minLength: 1
+          description: >
+            Text string of the authenticated session token provided by the infrastructure for the given combination of RHDT and user. 
+            Example: "##ertgth6dsghfsdf-5654t34wd12333f##1223sd!". 
+            Session tokens MUST BE UNIQUE. The server may periodically poll the infrastructure for session token validity.
+        project_id:
+          type: string
+          minLength: 1
+          description: >
+            Text string of the project id token provided by the ARTEMIS infrastructure.
+            Example: “##ertgth6dsghfsdf-5654t34wd12333f##1223sd!”. Project IDs MUST BE UNIQUE.
+            The server may periodically poll the infrastructure for session project_id validity.
+        facing:
+          type: integer
+          enum: [ 1, 2 ]
+          description: >
+            The alignment can be performed treating the surfaces as partial models that need to be fused into a larger surface or point cloud. 
+            In this case, if provided, surface sidedness information (normal vectors) forces the 3D models to align so that the facing of the two parts at the overlapping region is the same. 
+            Conversely, if the 3D models are different fragments or parts of an assembly, overlapping surfaces should have opposing sidedness, i.e. they should face each other.
+
+            Acceptable values are:
+            1 (same): The surfaces are forced to align so that the normals of the overlapping regions on the two models coincide. Suitable for partial scan registration and partial model fusion.
+            2 (opposite): The surfaces are forced to align so that the normals of the overlapping regions on the two models are opposite. Suitable for part or fragment assembly tasks.
+        global:
+          type: boolean
+          default: false
+          description: >
+            Specify whether an attempt should be made to globally register the source and target parts. 
+            Global registration tries to locate a pose for the source part that globally minimizes a residual distance between the two models. 
+            Conversely, a local registration approach attempts to minimize the registration error in a local manner, resulting in the closest match to the current pose of the parts. 
+
+            Please note that global registration is generally more error-prone and takes significantly more time to converge, so it is best avoided in interactive operations. 
+            If not defined, the default value is false, meaning that the approach is local.
+        locality:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.5
+          description: >
+            Specifies whether the registration favors well aligned points as opposed to considering an overall good alignment in the root mean square error sense. 
+            A strong locality is prone to disregard mismatched points as outliers. A weak locality will attempt to average the distance among a wider population of matching points. 
+
+            Please note that the exact effect of the parameter is subject to the currently selected method. Global registration approaches interpret this differently from local ones. 
+            Furthermore, the choice of the exact algorithm uses this parameter to internally set its own, method-specific parameters. 
+            For instance, ICP may use this for an outlier rejection distance determination (clamped ICP), or SICP might set the p parameter of the Lp distance metric. 
+
+            Locality is a normalized parameter, taking values in the range [0,1]. Default value is 0.5.
+        quality:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.5
+          description: >
+            A general, algorithm-agnostic quality parameter. 
+            In general, higher quality settings should yield a more refined and precise result, at the expense of more computational resources, i.e. time (iterations, precision of queries) or memory (supplementary data structures). 
+            The parameter may also affect the choice of the underlying local or global registration method and the use or not of auxiliary acceleration data structures, which might incur precision errors.
+
+            Quality is a normalized parameter, taking values in the range [0,1]. Default value is 0.5.
+        sample_ratio:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 1.0
+          description: >
+            Most registration methods require querying the distance of a number of samples from the source part against the geometry of the target object (and potentially vice versa). 
+            The number of samples to query can be exhaustive, i.e. all candidate points are checked and the resulting metric is computed using the entire set, or a sub-set can be used, randomly chosen in each iteration, in order to decrease the computational cost of the distance queries. 
+            The sample ratio defines a normalized portion of the eligible query points to be used. Range: [0,1]. 
+
+            Please note that reducing the sample count is an effective way to accelerate the alignment but also increases variance. In other words, fewer samples may result in a less precise pose estimation. 
+            Default value is 1.0: all points are used for distance queries.
+        anchor_bias:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.8
+          description: >
+            The “hardness” of the constraint to rely on available anchor points to guide the rigid registration. 
+            This is a normalized value in the range [0,1]. 
+            A value of 0.0 means that the available anchor points are not used. 
+            A value of 1.0 translates to solely relying on (available) anchor points to drive the registration. 
+
+            Default value is 0.8.
+
+    SetParametersBody:
+      type: object
+      properties:
+        facing:
+          type: integer
+          enum: [ 1, 2 ]
+          description: >
+            Alignment can be performed by treating the surfaces as partial models that need to be fused into a larger surface or point cloud. 
+            In this case, if provided, surface sidedness information (normal vectors) forces the 3D models to align so that the facing of the two parts at the overlapping region is the same. 
+            Conversely, if the 3D models are different fragments or parts of an assembly, overlapping surfaces should have opposing sidedness, i.e. they should face each other. 
+
+            Acceptable values are:
+            1: same. The surfaces are forced to align so that the normals of the overlapping regions on the two models coincide. Suitable for partial scan registration and partial model fusion.
+            2: opposite. The surfaces are forced to align so that the normals of the overlapping regions on the two models are opposite. Suitable for part or fragment assembly tasks.
+
+            Optional. If not defined, the current value is retained.
+        global:
+          type: boolean
+          description: >
+            Specify whether an attempt should be made to globally register the source and target parts. 
+            Global registration tries to locate a pose for the source part that globally minimizes a residual distance between the two models. 
+            Conversely, a local registration approach attempts to minimize the registration error in a local manner, resulting in the closest match to the current pose of the parts. 
+
+            Please note that global registration is generally more error-prone and takes significantly more time to converge, so it is best avoided in interactive operations.
+
+            Optional. If not defined, the current value is retained.
+        locality:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >
+            Specifies whether the registration favors well aligned points as opposed to considering an overall good alignment in the root mean square error sense. 
+            A strong locality is prone to disregard mismatched points as outliers. A weak locality will attempt to average the distance among a wider population of matching points. 
+
+            Please note that the exact effect of the parameter is subject to the currently selected method. Global registration approaches interpret this differently from local ones. 
+            Furthermore, the choice of the exact algorithm uses this parameter to internally set its own, method-specific parameters. 
+            For instance, ICP may use this for an outlier rejection distance determination (clamped ICP), or SICP might set the p parameter of the Lp distance metric. 
+
+            Locality is a normalized parameter, taking values in the range [0,1].
+
+            Optional. If not defined, the current value is retained.
+        quality:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >
+            A general, algorithm-agnostic quality parameter. 
+            In general, higher quality settings should yield a more refined and precise result, at the expense of more computational resources, i.e. time (iterations, precision of queries) or memory (supplementary data structures). 
+            The parameter may also affect the choice of the underlying local or global registration method and the use or not of auxiliary acceleration data structures, which might incur precision errors.
+
+            Quality is a normalized parameter, taking values in the range [0,1].
+
+            Optional. If not defined, the current value is retained.
+        sample_ratio:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >
+            Most registration methods require querying the distance of a number of samples from the source part against the geometry of the target object (and potentially vice versa). 
+            The number of samples to query can be exhaustive, i.e. all candidate points are checked and the resulting metric is computed using the entire set, or a sub-set can be used, randomly chosen in each iteration, in order to decrease the computational cost of the distance queries. 
+            The sample ratio defines a normalized portion of the eligible query points to be used. Range: [0,1]. 
+
+            Please note that reducing the sample count is an effective way to accelerate the alignment but also increases variance. In other words, fewer samples may result in a less precise pose estimation.
+
+            Optional. If not defined, the current value is retained.
+        anchor_bias:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >
+            The “hardness” of the constraint to rely on available anchor points to guide the rigid registration. 
+            This is a normalized value in the range [0,1]. 
+            A value of 0.0 means that the available anchor points are not used. 
+            A value of 1.0 translates to solely relying on (available) anchor points to drive the registration.
+
+            Optional. If not defined, the current value is retained.
+
+    ValidateSessionResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          enum: [ 0, 1, 2, 3, -1 ]
+          description: >
+            Provides a status code for the session. Status is one of the following:
+
+            0: ready. The session is complete in the sense that at least two declared 3D parts exist and the parameterization of the session is correct.
+
+            1: incomplete. At least one of the above core elements are missing.
+
+            2: busy. The GAS is still processing the required information for the preparation of the geometric parts. This may be due to the GAS loading of the models or processing the geometry to extract auxiliary data required by the underlying algorithm. Please note that in many cases, the service may invoke external microservices or direct calls to methods for the simplification of used 3D data, since many 3D models may be unnecessarily detailed for the task at hand (especially complementary registration for assembly).
+
+            3: pending. The session is queued and will start at some point in the future. The server is at full load.
+
+            -1 : unavailable. Internal server failure rendered the service unavailable. For fault tolerant implementations, an “unavailable” signal may be followed by a “busy” and “ready” (or “incomplete”) status in subsequent calls to validate_session, if the failed service is attempting to recover the session data representation and falls back to its last known state.
+        details:
+          type: string
+          description: A string providing more information about the status report. This is implementation-specific.
+
+    AddPartBody:
+      type: object
+      required: [ model_url ]
+      properties:
+        model_url:
+          type: string
+          format: uri
+          description: >
+            The URL of the external 3D model to load. 
+            This can either be a standalone file with embedded material information, such as a PLY or GLB file, or a ZIP file, which, when extracted locally at the rendering server local storage, contains the correctly indexed file structure to point to the dependencies of the main extracted 3D model file. 
+            Only a single 3D model must be present in the extracted ZIP file and all resources referenced must be declared relative to this file. No absolute paths or indirect links to external resources are supported. 
+
+            Examples:
+            "http://graphics.cs.aueb.gr/graphics/downloads/fragments/Tombstone1.glb"
+            "http://graphics.cs.aueb.gr/graphics/downloads/fragments/Tombstone3_low.zip"
+
+            Upon successful retrieval of the external 3D model using the provided URL, the service responds with a success (201) message. 
+            However, the 3D model itself may take some time to load and become ready for queries on the GAS. The client may check the status of the instance using the respective API call.
+        model_transform:
+          type: array
+          items: { type: number }
+          minItems: 16
+          maxItems: 16
+          default: [ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 ]
+          description: >
+            A 4X4 array M of floating point values describing the geometric transformation of the 3D model in row-major form. 
+            Given a vertex v on the 3D model, v’ = M v is the vertex transformed in the coordinate system of the global coordinate system of all pieces in the collection. 
+            Sanity checks are performed on the provided transformations in order to avoid potentially catastrophic errors, such as NAN values or zeroes in disallowed locations. 
+
+            Example:
+            [1, 0, 0, 20.3, 0, 1.0, 0.0, 5.4, 0, 0, 1, 3, 0, 0, 0, 1] 
+            This is a translation matrix by an offset vector (20.3, 5.4, 3.0).
+
+            Optional. If not defined, an identity matrix is assumed.
+
+    AddPartResponse:
+      type: object
+      properties:
+        part_id:
+          type: string
+          description: Unique part ID.
+
+    PartStatusResponse:
+      type: object
+      properties:
+        part_status:
+          type: integer
+          enum: [ -1, 0, 1, 2, 3 ]
+          description: >
+            Reports the current condition of the asset being queried on the GAS. 
+            Possible answers correspond to a numerical value signifying the stage of asset readiness:
+
+            3 : fetching asset: Asset is being downloaded by the GAS to internal local storage.
+            2 : processing asset: Asset is being a) decompressed, b) optimized, c) processed for additional auxiliary data structures. This is an optional state for an asset, depending on its type and preprocessing determined by the GAS.
+            1 : loading asset: Asset is being loaded. This is only meaningful for very large datasets.
+            -1 : failed: Any of the above stages has failed and the asset cannot be used.
+            0 : ready: The asset is ready to be used.
+
+    SetPartTransformBody:
+      type: object
+      required: [ part_id, part_transform ]
+      properties:
+        part_id:
+          type: string
+          description: >
+            An existing part ID returned from the GAS when adding a 3D model to the session collection. 
+            It is the node whose geometric transformation is to be replaced by the new one.
+        part_transform:
+          type: array
+          items: { type: number }
+          minItems: 16
+          maxItems: 16
+          description: >
+            A 4X4 array M of floating point values describing the global rigid transformation (roto-translation) of the part in row-major form. 
+            Sanity checks are performed on the provided transformations in order to avoid potentially catastrophic errors, such as NAN values or zeroes in disallowed locations. 
+            See any computer graphics textbook for the standard formulation of such a matrix.
+
+    GroupPartsBody:
+      type: object
+      required: [ part_ids ]
+      properties:
+        part_ids:
+          type: array
+          items: { type: string }
+          minItems: 2
+          description: >
+            An array of the IDs of parts to be grouped together. 
+            All IDs must be valid and none of the parts should be contained within another group for the operation to succeed. 
+            At least two part IDs must be provided.
+
+    GroupPartsResponse:
+      type: object
+      properties:
+        group_id:
+          type: string
+          description: Unique group ID.
+
+    AddAnchorBody:
+      type: object
+      required: [ parts, anchors ]
+      properties:
+        parts:
+          type: array
+          items: { type: string }
+          minItems: 2
+          maxItems: 2
+          description: The pair of parts to assign anchor points to.
+        anchors:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: array
+            items: { type: number }
+            minItems: 3
+            maxItems: 3
+          description: The x,y,z coordinates of the first and second anchor points to be tethered, in local object coordinates for each part.
+
+    AddAnchorResponse:
+      type: object
+      properties:
+        anchor_id:
+          type: string
+          description: Unique anchor ID.
+
+    AlignResponse:
+      type: object
+      properties:
+        source_transform:
+          type: array
+          items: { type: number }
+          minItems: 16
+          maxItems: 16
+        error_min:
+          type: number
+        error_max:
+          type: number
+        error_ave:
+          type: number
+        converged:
+          type: boolean
+        time_elapsed:
+          type: number
+
+    BundleAdjustResponse:
+      type: object
+      properties:
+        parts:
+          type: array
+          items:
+            type: object
+            properties:
+              part_id: { type: string }
+              part_transform:
+                type: array
+                items: { type: number }
+                minItems: 16
+                maxItems: 16
+        error_min:
+          type: number
+        error_max:
+          type: number
+        error_ave:
+          type: number
+        converged:
+          type: boolean
+        time_elapsed:
+          type: number
+
+    GetAlignStatusResponse:
+      type: object
+      properties:
+        source_transform:
+          type: array
+          items: { type: number }
+          minItems: 16
+          maxItems: 16
+        error_min:
+          type: number
+        error_max:
+          type: number
+        error_ave:
+          type: number
+        converged:
+          type: boolean
+        time_expired:
+          type: boolean
+          description: Whether the simulation has finished processing.
+
+    GetBundleStatusResponse:
+      type: object
+      properties:
+        parts:
+          type: array
+          items:
+            type: object
+            properties:
+              part_id: { type: string }
+              part_transform:
+                type: array
+                items: { type: number }
+                minItems: 16
+                maxItems: 16
+        error_min:
+          type: number
+        error_max:
+          type: number
+        error_ave:
+          type: number
+        converged:
+          type: boolean
+        time_expired:
+          type: boolean
+
+    AcquireLockResponse:
+      type: object
+      properties:
+        lock_acquired:
+          type: boolean
+          description: Status of lock acquisition.
+
+    ReleaseLockResponse:
+      type: object
+      properties:
+        lock_released:
+          type: boolean
+          description: Status of lock release.
+
+    GetLockStateResponse:
+      type: object
+      properties:
+        lock_status:
+          type: boolean
+          description: Lock status boolean.
+
+  ###########################################################
+  # Reusable Responses
+  ###########################################################
+  responses:
+    BadRequest:
+      description: Bad or missing parameters in the definition of the service.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cause: { type: string }
+              solution: { type: string }
+    Unauthorized:
+      description: Session ID was not validated or expired.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cause: { type: string }
+              solution: { type: string }
+    Forbidden:
+      description: Forbidden. Project is locked or insufficient permissions.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cause: { type: string }
+              solution: { type: string }
+    InternalError:
+      description: Internal service error.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cause: { type: string }
+              solution: { type: string }
